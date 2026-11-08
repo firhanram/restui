@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use crate::{
@@ -69,23 +69,52 @@ fn draw_main(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
     draw_requests(frame, app, columns[0]);
 
+    let name_width = columns[1].width.saturating_sub(2).max(1);
+    let name_lines = app
+        .current_request()
+        .name
+        .chars()
+        .count()
+        .div_ceil(name_width as usize)
+        .clamp(1, 4) as u16;
     let request_area = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(name_lines + 2),
             Constraint::Length(3),
             Constraint::Length(8),
             Constraint::Min(5),
         ])
         .split(columns[1]);
-    draw_url_bar(frame, app, request_area[0]);
+    draw_request_name(frame, app, request_area[0]);
+    draw_url_bar(frame, app, request_area[1]);
 
     let editors = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(request_area[1]);
+        .split(request_area[2]);
     draw_params(frame, app, editors[0]);
     draw_body(frame, app, editors[1]);
-    draw_response(frame, app, request_area[2]);
+    draw_response(frame, app, request_area[3]);
+}
+
+fn draw_request_name(frame: &mut Frame, app: &App, area: Rect) {
+    frame.render_widget(
+        Paragraph::new(app.current_request().name.as_str())
+            .style(
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .title(" Request · r rename ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(MUTED)),
+            ),
+        area,
+    );
 }
 
 fn draw_requests(frame: &mut Frame, app: &App, area: Rect) {
@@ -621,6 +650,27 @@ mod tests {
         assert_eq!(line.spans[1].style.fg, Some(ACCENT));
         assert_eq!(line.spans[3].style.fg, Some(Color::Magenta));
         assert_eq!(line.spans[7].style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn renders_the_complete_wrapped_request_name() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::new(directory.path().join("workspaces.json"));
+        let mut app = App::new(storage).unwrap();
+        let name = "Full Custom SNAP transaction token request with optional fields and nested folder / Payment API";
+        app.workspaces[0].requests[0].name = name.to_string();
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered: String = (4..6)
+            .flat_map(|y| (31..119).map(move |x| (x, y)))
+            .map(|position| buffer[position].symbol())
+            .collect();
+        let normalized = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(normalized, name);
     }
 
     #[test]
